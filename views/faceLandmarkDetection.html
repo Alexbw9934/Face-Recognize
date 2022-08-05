@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="face-api.js"></script>
+  <script src="js/commons.js"></script>
+  <script src="js/faceDetectionControls.js"></script>
+  <script src="js/imageSelectionControls.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.100.2/css/materialize.css">
+  <script type="text/javascript" src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.100.2/js/materialize.min.js"></script>
+  <style>
+    .show {
+      display: block !important;
+    }
+    table {
+      border: 1px solid grey;
+      border-collapse: none;
+    }
+    tr, td, th {
+      border: 1px solid grey;
+    }
+  </style>
+</head>
+<body>
+  <div class="">
+    <div class="progress" id="loader" style="width: 100vw !important">
+      <div class="indeterminate"></div>
+    </div>
+    <div style="display: flex; flex-direction: row;">
+      <div style="width: 40vw; margin-top: 20px; margin-left: 20px; margin-right: 20px; border: 1px solid grey; padding: 25px; border-radius: 10px">
+        <label for="first">First Name:&nbsp;</label><input type="text" name="first" id="first">
+        <label for="last">Last Name:&nbsp;</label><input type="text" name="last" id="last"><br><br><br><br><br>
+        <label for="last">Scanner Name:&nbsp;</label><input type="text" name="scan" id="scan">
+        <input type="button" value="Search">
+      </div>
+      <div style="width: 60vw">
+        <div style="position: relative;" class="margin" style="width: 50vw !important">
+          <img id="inputImg" src="" style=" border: 1px solid grey !important; height: 250px; width: 250px !important;" />
+          <canvas id="overlay" ></canvas>
+        </div>
+          <input id="queryImgUploadInput" type="file" style="margin-left: 20px" onchange="loadI()" accept=".jpg, .jpeg, .png" multiple >
+        <div style="margin-top: 20px; margin-left: 20px">
+          <table id="resultTable">
+            <tr>
+              <th></th>
+              <th>Left</th>
+              <th>Right</th>
+              <th>Distance</th>
+            </tr>
+            <tr>
+              <td>Eyes</td>
+              <td></td>
+              <td></td>
+              <td></td>
+            </tr>
+            <tr>
+              <td>Ears</td>
+              <td></td>
+              <td></td>
+              <td></td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    </div>
+    
+  </body>
+
+  <script>
+    let withBoxes = true
+    var file = null
+    $('#queryImgUploadInput').on('change', (e) => {
+      file = e.target.files;
+    } );
+    
+    function onChangeHideBoundingBoxes(e) {
+      withBoxes = !$(e.target).prop('checked')
+      updateResults()
+    }
+
+    async function updateResults() {
+      if (!isFaceDetectionModelLoaded()) {
+        return
+      }
+
+      const inputImgEl = $('#inputImg').get(0)
+      const options = getFaceDetectorOptions()
+
+      const results = await faceapi.detectAllFaces(inputImgEl, options).withFaceLandmarks()
+      
+
+      const canvas = $('#overlay').get(0)
+      faceapi.matchDimensions(canvas, inputImgEl)
+      const resizedResults = faceapi.resizeResults(results, inputImgEl)
+
+      if (withBoxes) {
+        faceapi.draw.drawDetections(canvas, resizedResults)
+      }
+      faceapi.draw.drawFaceLandmarks(canvas, resizedResults)
+    }
+
+    async function run() {
+      // load face detection and face landmark models
+      await changeFaceDetector(SSD_MOBILENETV1)
+      await faceapi.loadFaceLandmarkModel('/')
+
+      // start processing image
+      updateResults()
+    }
+
+    function loadI() {
+      $('#loader').attr('style','display: block');
+      const result = loadImageFromUpload();
+      result.then((res) => {
+        $('#loader').attr('style','display: none');
+        const leftEye = res.getLeftEye()
+        const rightEye = res.getRightEye()
+        const distanceEye = Math.sqrt((rightEye[0]._x - leftEye[3]._x)**2 + (rightEye[0]._y - leftEye[3]._y)**2)
+        const distanceEyeCm = distanceEye/37.7952;
+
+        const Earline = res._positions;
+        const distanceEar = Math.sqrt((Earline[0]._x - Earline[16]._x)**2 + (Earline[0]._y - Earline[16]._y)**2)
+        const distanceEarCm = distanceEar/37.7952;
+        
+        const jawline = res.getJawOutline();
+        const jaw = Math.sqrt((jawline[5]._x - jawline[11]._x)**2 + (jawline[5]._y - jawline[11]._y)**2)
+        const jawCm = jaw/37.7952;
+
+        $('#resultTable').empty();
+        $('#resultTable').append("<tr><th></th><th>Left</th><th>Right</th><th>Distance</th></tr><tr><td>Eyes</td><td>"+ "X:" + leftEye[3]._x + " Y:" + leftEye[3]._y +"</td><td>"+ "X:" + rightEye[0]._x + " Y:" + rightEye[0]._y + "</td><td>"+ distanceEyeCm +"</td></tr><tr><td>Ears</td><td>"+ "X:" + Earline[0]._x + " Y:" + Earline[0]._y +"</td><td>"+ "X:" + Earline[16]._x + " Y:" + Earline[16]._y +"</td><td>"+ distanceEarCm +"</td></tr>");
+      
+        var formData = new FormData();
+        
+        formData.append('file', file[0]);
+        formData.append('leftEye', JSON.stringify(leftEye[3]));
+        formData.append('rightEye', JSON.stringify(rightEye[0]));
+        formData.append('distanceEye', distanceEyeCm);
+        formData.append('leftEar', JSON.stringify(Earline[0]));
+        formData.append('rightEar', JSON.stringify(Earline[16]));
+        formData.append('distanceEar', distanceEarCm);
+        formData.append('jaw', jawCm);
+
+        $.ajax({
+            url: '/api/photo',
+            type: 'POST',
+            data: formData,
+            success: function (data) {
+                console.log(data);
+            },
+            cache: false,
+            contentType: false,
+            processData: false
+        });
+
+      }).catch((err) => {
+        $('#loader').attr('style','display: none');
+        console.log(err);
+      })
+    }
+    
+
+    $(document).ready(function() {
+      
+      initFaceDetectionControls()
+      run()
+      
+    })
+  </script>
+</body>
+</html>
